@@ -1,0 +1,7 @@
+fastapi==0.103.2
+google-cloud-aiplatform>=1.38
+python-dotenv
+BeautifulSoup4
+playwright==1.40.0
+uvicorn==0.23.2
+pillow

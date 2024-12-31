@@ -1,0 +1,8 @@
+name: NiNvErIfY
+services:
+  nin:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    ports:
+      - "300:300"
