@@ -1,7 +1,6 @@
 fastapi==0.103.2
-google-cloud-aiplatform>=1.38
+google-genai>=1.0.0
 python-dotenv
 BeautifulSoup4
-playwright==1.40.0
+playwright>=1.49.0
 uvicorn==0.23.2
-pillow

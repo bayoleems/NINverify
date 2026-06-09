@@ -129,6 +129,7 @@ celerybeat.pid
 
 # Environments
 .env
+secret_key.json
 .venv
 env/
 venv/

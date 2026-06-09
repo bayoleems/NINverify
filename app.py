@@ -1,15 +1,11 @@
 from dotenv import load_dotenv
-import json
-import os
+
+load_dotenv()
+
 from schemas import Payload
 from helpers import crawler, crawler_sync
 from fastapi import FastAPI
 import uvicorn
-
-load_dotenv()
-
-
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = 'secret_key.json'
 
 app = FastAPI(title='NIN Validation API', 
               description='using Artificial Intelligence to validate National Identity Number.', 

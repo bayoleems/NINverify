@@ -1,63 +1,87 @@
-
-from vertexai.generative_models import GenerativeModel, Part
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError
+from dotenv import load_dotenv
 from playwright.async_api import  async_playwright
 from playwright.sync_api import  sync_playwright
 from bs4 import BeautifulSoup
-from PIL import Image
 from schemas import Payload
-import io
 import os
+import sys
 import time
 import re
 
-def convert_image_to_bytes(image_path):
-    """
-    Converts an image to a byte array and determines the correct MIME type based on the file extension.
+load_dotenv()
 
-    Args:
-        image_path (str): The file path to the image.
+GEMINI_CAPTCHA_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-flash-lite-latest",
+    "gemini-2.5-flash",
+    "gemini-flash-latest",
+]
+RETRYABLE_GEMINI_CODES = {429, 500, 503, 504}
+GEMINI_MAX_RETRIES = 3
 
-    Returns:
-        tuple: A tuple containing the byte array of the image and its MIME type.
-    """
-    # Load the image
-    img = Image.open(image_path)
-    
-    # Extract the file extension and map it to a MIME type
-    ext = os.path.splitext(image_path)[1].lower()
-    mime_type = {
-        '.png': 'image/png',
-        '.jpg': 'image/jpeg',
-        '.jpeg': 'image/jpeg',
-        '.gif': 'image/gif',
-        '.bmp': 'image/bmp',
-        '.tiff': 'image/tiff'
-    }.get(ext) 
+async def launch_browser(playwright):
+    launch_kwargs = {"headless": True}
+    if sys.platform == "darwin":
+        launch_kwargs["channel"] = "chrome"
+    try:
+        return await playwright.chromium.launch(**launch_kwargs)
+    except Exception:
+        launch_kwargs.pop("channel", None)
+        return await playwright.chromium.launch(**launch_kwargs)
 
-    # Convert the image to bytes
-    img_byte_array = io.BytesIO()
-    img.save(img_byte_array, format=img.format)
-    img_byte_array = img_byte_array.getvalue()
-
-    return img_byte_array, mime_type
+def launch_browser_sync(playwright):
+    launch_kwargs = {"headless": True}
+    if sys.platform == "darwin":
+        launch_kwargs["channel"] = "chrome"
+    try:
+        return playwright.chromium.launch(**launch_kwargs)
+    except Exception:
+        launch_kwargs.pop("channel", None)
+        return playwright.chromium.launch(**launch_kwargs)
 
 def gemini_text_extraction(captcha_image_path):
-    model = GenerativeModel(
-    "gemini-1.5-flash-001",
-    system_instruction=[
-        """
-        Extract the text content from the provided image and return it in plain text format.
-        """
+    with open(captcha_image_path, "rb") as f:
+        image_bytes = f.read()
+
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    contents = [
+        types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+        "What is shown in this image?",
     ]
+    config = types.GenerateContentConfig(
+        system_instruction="Extract the text content from the provided image and return it in plain text format.",
     )
 
-    img_byte_array, mime_type = convert_image_to_bytes(captcha_image_path)
-    chat = model.generate_content([Part.from_data(data=img_byte_array, mime_type=mime_type),"What is shown in this image?"])
-    captcha_value = chat.to_dict()['candidates'][0]['content']['parts'][0]['text']
-    
-    captcha_value = ''.join(re.findall(r'\d+', captcha_value))
+    models = GEMINI_CAPTCHA_MODELS
+    if os.getenv("GEMINI_MODEL"):
+        models = [os.environ["GEMINI_MODEL"], *GEMINI_CAPTCHA_MODELS]
 
-    return captcha_value
+    last_error = None
+    for model in dict.fromkeys(models):
+        for attempt in range(GEMINI_MAX_RETRIES):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config,
+                )
+                captcha_value = ''.join(re.findall(r'\d+', response.text))
+                return captcha_value
+            except APIError as error:
+                last_error = error
+                if error.code == 404:
+                    break
+                if error.code in RETRYABLE_GEMINI_CODES and attempt < GEMINI_MAX_RETRIES - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                if error.code in RETRYABLE_GEMINI_CODES:
+                    break
+                raise
+
+    raise last_error
 
 def extract_table_data(content):
     soup = BeautifulSoup(content, "html.parser")
@@ -76,7 +100,7 @@ def extract_table_data(content):
 async def crawler(payload: Payload):
     captcha_image_path = "captcha.png"
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await launch_browser(p)
         context = await browser.new_context()
         page = await context.new_page()
         
@@ -166,7 +190,7 @@ async def crawler(payload: Payload):
 def crawler_sync(payload: Payload):
     captcha_image_path = "captcha.png"
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = launch_browser_sync(p)
         context = browser.new_context()
         page = context.new_page()
         
